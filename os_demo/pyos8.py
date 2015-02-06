@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 
 # ------------------------------------------------------------
-# pyos7.py  -  The Python Operating System
+# pyos8.py  -  The Python Operating System
 #
-# Step 6 : I/O Waiting Support added
+# Step 7 : Support for coroutine trampolines (subroutines)
 # ------------------------------------------------------------
+
+import types
 
 # ------------------------------------------------------------
 #                       === Tasks ===
@@ -19,10 +21,29 @@ class Task(object):
         self.tid     = Task.taskid  # Task ID
         self.target  = target       # Target coroutine
         self.sendval = None         # Value to send
+        self.stack   = []           # Call stack
 
     # Run a task until it hits the next yield statement
     def run(self):
-        return self.target.send(self.sendval)
+        while True:
+            try:
+                result = self.target.send(self.sendval)
+                if isinstance(result, SystemCall):
+                    return result
+                if isinstance(result, types.GeneratorType):
+                    self.stack.append(self.target)
+                    self.sendval = None
+                    self.target  = result
+                else:
+                    if not self.stack:
+                        return
+                    self.sendval = result
+                    self.target = self.stack.pop()
+            except StopIteration:
+                if not self.stack:
+                    raise
+                self.sendval = result
+                self.target = self.stack.pop()
 
 # ------------------------------------------------------------
 #                      === Scheduler ===
@@ -184,7 +205,25 @@ class WriteWait(SystemCall):
         self.sched.waitforwrite(self.task, fd)
 
 # ------------------------------------------------------------
+#                      === Library Functions ===
+# ------------------------------------------------------------
+
+def Accept(sock):
+    yield ReadWait(sock)
+    yield sock.accept()
+
+def Send(sock, buffer):
+    while buffer:
+        yield WriteWait(sock)
+        len = sock.send(buffer)
+        buffer = buffer[len:]
+
+def Recv(sock, maxbytes):
+    yield ReadWait(sock)
+    yield sock.recv(maxbytes)
+
+# ------------------------------------------------------------
 #                      === Example ===
 # ------------------------------------------------------------
 
-# Run the script echogood.py to see this work
+# Look at the echoserver.py script for an example
